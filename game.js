@@ -1,5 +1,7 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const boardShell = document.getElementById('boardShell');
+const voidModeToggle = document.getElementById('voidModeToggle');
 
 // Background animation setup
 const bgContainer = document.getElementById('backgroundContainer');
@@ -66,13 +68,64 @@ animateBackground();
 
 const GRID_SIZE = 20;
 const TILE_COUNT = canvas.width / GRID_SIZE;
+const ORIGINAL_TICK_MS = 100;
+const BASE_TICK_MS = ORIGINAL_TICK_MS / 0.96;
+const BOOST_SPEED_MULTIPLIER = 1.7;
+const DEATH_EFFECT_MS = 2800;
+const BOARD_ROTATION_SCORE = 420;
+const NICE_COUNTDOWN_START = 3;
 
 let gameRunning = false;
-let gamePaused = false;
+let boostActive = false;
+let boardRotationActive = false;
+let darkModeActive = localStorage.getItem('snakeVoidMode') === 'true';
 let score = 0;
 let highScore = localStorage.getItem('snakeHighScore') || 0;
+let lastGlitchMilestone = 0;
+let nicePauseActive = false;
+let nicePauseIntervalId = null;
+let nicePauseTimeoutId = null;
 
-document.getElementById('highScore').textContent = highScore;
+const glitchState = {
+    active: false,
+    level: 0,
+    score: 0,
+    startedAt: 0,
+    endsAt: 0,
+    rafId: null
+};
+
+const deathState = {
+    active: false,
+    startedAt: 0,
+    endsAt: 0,
+    score: 0,
+    particles: [],
+    sparks: [],
+    timeoutId: null
+};
+
+document.getElementById('highScore').textContent = scoreForDisplay(Number(highScore));
+
+function isNiceScore(scoreValue) {
+    return scoreValue > 0 && scoreValue % 100 === 70;
+}
+
+function scoreForDisplay(scoreValue) {
+    return isNiceScore(scoreValue) ? scoreValue - 1 : scoreValue;
+}
+
+function updateScoreDisplay() {
+    document.getElementById('score').textContent = scoreForDisplay(score);
+}
+
+function setVoidMode(isActive) {
+    darkModeActive = isActive;
+    document.body.classList.toggle('void-mode', isActive);
+    voidModeToggle.setAttribute('aria-pressed', String(isActive));
+    voidModeToggle.textContent = isActive ? 'VOID ON' : 'VOID';
+    localStorage.setItem('snakeVoidMode', String(isActive));
+}
 
 // Simple JSON-based leaderboard via Vercel API
 async function fetchLeaderboard() {
@@ -125,7 +178,8 @@ function showLeaderboard() {
     });
 }
 
-function showSubmitScoreModal(scoreValue) {
+function showSubmitScoreModal(scoreValue, isNewHighScore = false) {
+    document.querySelector('#submitScoreModal h2').textContent = isNewHighScore ? 'NEW HIGH SCORE!' : 'SUBMIT SCORE';
     document.getElementById('scoreValue').textContent = `Score: ${scoreValue}`;
     document.getElementById('playerName').value = '';
     document.getElementById('playerName').focus();
@@ -174,8 +228,219 @@ function spawnFood() {
     }
 }
 
+function resetGlitch() {
+    if (glitchState.rafId) cancelAnimationFrame(glitchState.rafId);
+    lastGlitchMilestone = 0;
+    glitchState.active = false;
+    glitchState.level = 0;
+    glitchState.score = 0;
+    glitchState.startedAt = 0;
+    glitchState.endsAt = 0;
+    glitchState.rafId = null;
+    document.body.classList.remove('glitching');
+    document.documentElement.style.removeProperty('--glitch-intensity');
+    document.documentElement.style.removeProperty('--glitch-duration');
+    document.documentElement.style.removeProperty('--glitch-small');
+    document.documentElement.style.removeProperty('--glitch-small-neg');
+    document.documentElement.style.removeProperty('--glitch-medium');
+    document.documentElement.style.removeProperty('--glitch-medium-neg');
+    document.documentElement.style.removeProperty('--glitch-large');
+    document.documentElement.style.removeProperty('--glitch-large-neg');
+    document.documentElement.style.removeProperty('--glitch-glow');
+    document.documentElement.style.removeProperty('--glitch-line-gap');
+    document.documentElement.style.removeProperty('--glitch-overlay-opacity');
+    document.documentElement.style.removeProperty('--glitch-tear-opacity');
+    document.documentElement.style.removeProperty('--glitch-saturation');
+    document.documentElement.style.removeProperty('--glitch-contrast');
+}
+
+function triggerScoreGlitch(scoreValue) {
+    const level = scoreValue / 100;
+    const duration = Math.min(850 + level * 180, 2600);
+    const intensity = Math.min(1 + level * 0.35, 4.5);
+    const now = performance.now();
+
+    glitchState.active = true;
+    glitchState.level = level;
+    glitchState.score = scoreValue;
+    glitchState.startedAt = now;
+    glitchState.endsAt = now + duration;
+
+    document.documentElement.style.setProperty('--glitch-intensity', intensity.toFixed(2));
+    document.documentElement.style.setProperty('--glitch-duration', `${duration}ms`);
+    document.documentElement.style.setProperty('--glitch-small', `${intensity.toFixed(2)}px`);
+    document.documentElement.style.setProperty('--glitch-small-neg', `${(-intensity).toFixed(2)}px`);
+    document.documentElement.style.setProperty('--glitch-medium', `${(intensity * 2).toFixed(2)}px`);
+    document.documentElement.style.setProperty('--glitch-medium-neg', `${(-intensity * 2).toFixed(2)}px`);
+    document.documentElement.style.setProperty('--glitch-large', `${(intensity * 4).toFixed(2)}px`);
+    document.documentElement.style.setProperty('--glitch-large-neg', `${(-intensity * 4).toFixed(2)}px`);
+    document.documentElement.style.setProperty('--glitch-glow', `${(intensity * 14).toFixed(2)}px`);
+    document.documentElement.style.setProperty('--glitch-line-gap', `${Math.max(2, 7 - intensity).toFixed(2)}px`);
+    document.documentElement.style.setProperty('--glitch-overlay-opacity', Math.min(0.85, 0.22 + intensity * 0.12).toFixed(2));
+    document.documentElement.style.setProperty('--glitch-tear-opacity', Math.min(0.75, 0.18 + intensity * 0.1).toFixed(2));
+    document.documentElement.style.setProperty('--glitch-saturation', `${(1.2 + intensity * 0.45).toFixed(2)}`);
+    document.documentElement.style.setProperty('--glitch-contrast', `${(1.05 + intensity * 0.12).toFixed(2)}`);
+    document.body.classList.remove('glitching');
+    void document.body.offsetWidth;
+    document.body.classList.add('glitching');
+
+    if (glitchState.rafId) cancelAnimationFrame(glitchState.rafId);
+    const stopGlitch = () => {
+        if (performance.now() >= glitchState.endsAt) {
+            glitchState.active = false;
+            document.body.classList.remove('glitching');
+            glitchState.rafId = null;
+            return;
+        }
+        glitchState.rafId = requestAnimationFrame(stopGlitch);
+    };
+    glitchState.rafId = requestAnimationFrame(stopGlitch);
+}
+
+function maybeTriggerScoreGlitch() {
+    if (score > 0 && score % 100 === 0 && score !== lastGlitchMilestone) {
+        lastGlitchMilestone = score;
+        triggerScoreGlitch(score);
+    }
+}
+
+function setBoardRotationActive(isActive) {
+    if (boardRotationActive === isActive) return;
+
+    boardRotationActive = isActive;
+    boardShell.classList.toggle('board-rotating', isActive);
+}
+
+function maybeStartBoardRotation() {
+    if (score >= BOARD_ROTATION_SCORE) {
+        setBoardRotationActive(true);
+    }
+}
+
+function clearNicePause() {
+    if (nicePauseIntervalId) clearInterval(nicePauseIntervalId);
+    if (nicePauseTimeoutId) clearTimeout(nicePauseTimeoutId);
+
+    nicePauseActive = false;
+    nicePauseIntervalId = null;
+    nicePauseTimeoutId = null;
+
+    const overlay = document.getElementById('niceOverlay');
+    overlay.classList.remove('show');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('nice-paused');
+}
+
+function triggerNicePause() {
+    if (nicePauseActive) return;
+
+    const overlay = document.getElementById('niceOverlay');
+    const countdown = document.getElementById('niceCountdown');
+    let remaining = NICE_COUNTDOWN_START;
+
+    nicePauseActive = true;
+    boostActive = false;
+    countdown.textContent = remaining;
+    overlay.classList.add('show');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('nice-paused');
+    document.getElementById('gameStatus').textContent = 'NICE pause';
+
+    nicePauseIntervalId = setInterval(() => {
+        remaining -= 1;
+
+        if (remaining > 0) {
+            countdown.textContent = remaining;
+            return;
+        }
+
+        countdown.textContent = 'GO';
+        clearInterval(nicePauseIntervalId);
+        nicePauseIntervalId = null;
+        nicePauseTimeoutId = setTimeout(() => {
+            clearNicePause();
+            if (gameRunning) {
+                document.getElementById('gameStatus').textContent = 'Hold SPACE to boost';
+            }
+        }, 650);
+    }, 1000);
+}
+
+function resetDeathEffect() {
+    if (deathState.timeoutId) clearTimeout(deathState.timeoutId);
+
+    deathState.active = false;
+    deathState.startedAt = 0;
+    deathState.endsAt = 0;
+    deathState.score = 0;
+    deathState.particles = [];
+    deathState.sparks = [];
+    deathState.timeoutId = null;
+    document.body.classList.remove('death-effect');
+}
+
+function createDeathParticles() {
+    const particles = [];
+    const sparks = [];
+
+    snake.forEach((segment, index) => {
+        const baseX = segment.x * GRID_SIZE + GRID_SIZE / 2;
+        const baseY = segment.y * GRID_SIZE + GRID_SIZE / 2;
+        const pieces = index === 0 ? 18 : 8;
+
+        for (let i = 0; i < pieces; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 1.6 + Math.random() * (index === 0 ? 9 : 5);
+            particles.push({
+                x: baseX,
+                y: baseY,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: 2 + Math.random() * 8,
+                spin: (Math.random() - 0.5) * 0.5,
+                angle,
+                color: ['#ff004c', '#00f5ff', '#fff200', '#ffffff', '#4dd4ac'][Math.floor(Math.random() * 5)]
+            });
+        }
+    });
+
+    for (let i = 0; i < 90; i++) {
+        const edge = Math.floor(Math.random() * 4);
+        sparks.push({
+            x: edge === 0 ? 0 : edge === 1 ? canvas.width : Math.random() * canvas.width,
+            y: edge === 2 ? 0 : edge === 3 ? canvas.height : Math.random() * canvas.height,
+            length: 12 + Math.random() * 64,
+            angle: Math.random() * Math.PI * 2,
+            color: Math.random() > 0.5 ? '#ff004c' : '#00f5ff'
+        });
+    }
+
+    deathState.particles = particles;
+    deathState.sparks = sparks;
+}
+
+function triggerDeathEffect(onComplete) {
+    resetGlitch();
+    resetDeathEffect();
+    createDeathParticles();
+
+    const now = performance.now();
+    deathState.active = true;
+    deathState.startedAt = now;
+    deathState.endsAt = now + DEATH_EFFECT_MS;
+    deathState.score = scoreForDisplay(score);
+    document.body.classList.add('death-effect');
+
+    deathState.timeoutId = setTimeout(() => {
+        deathState.active = false;
+        deathState.timeoutId = null;
+        document.body.classList.remove('death-effect');
+        onComplete();
+    }, DEATH_EFFECT_MS);
+}
+
 function update() {
-    if (!gameRunning || gamePaused) return;
+    if (!gameRunning || nicePauseActive) return;
 
     direction = nextDirection;
 
@@ -198,11 +463,180 @@ function update() {
     // Check food collision
     if (head.x === food.x && head.y === food.y) {
         score += 10;
-        document.getElementById('score').textContent = score;
+        updateScoreDisplay();
+        maybeTriggerScoreGlitch();
+        maybeStartBoardRotation();
         spawnFood();
+        if (isNiceScore(score)) {
+            triggerNicePause();
+        }
     } else {
         snake.pop();
     }
+}
+
+function drawGlitchEffects() {
+    if (!glitchState.active) return;
+
+    const now = performance.now();
+    const duration = glitchState.endsAt - glitchState.startedAt;
+    const remaining = Math.max(0, glitchState.endsAt - now);
+    const fade = Math.min(1, remaining / duration);
+    const level = glitchState.level;
+    const intensity = Math.min(1 + level * 0.4, 5);
+    const time = now * 0.02;
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+
+    const channelAlpha = Math.min(0.08 + level * 0.018, 0.22) * fade;
+    ctx.globalAlpha = channelAlpha;
+    ctx.globalCompositeOperation = 'screen';
+    ctx.filter = 'hue-rotate(110deg) saturate(300%)';
+    ctx.drawImage(canvas, Math.sin(time) * intensity, -intensity * 0.5);
+    ctx.filter = 'hue-rotate(290deg) saturate(300%)';
+    ctx.drawImage(canvas, -Math.cos(time * 1.2) * intensity, intensity * 0.5);
+    ctx.filter = 'none';
+    ctx.globalCompositeOperation = 'source-over';
+
+    const sliceCount = Math.min(5 + Math.floor(level * 1.4), 18);
+    for (let i = 0; i < sliceCount; i++) {
+        const y = Math.floor(Math.random() * canvas.height);
+        const h = Math.max(2, Math.floor(Math.random() * (5 + level * 2)));
+        const offset = (Math.random() - 0.5) * intensity * 7;
+        ctx.globalAlpha = (0.25 + Math.random() * 0.35) * fade;
+        ctx.drawImage(canvas, 0, y, canvas.width, h, offset, y, canvas.width, h);
+    }
+
+    const blockCount = Math.min(3 + Math.floor(level), 12);
+    for (let i = 0; i < blockCount; i++) {
+        ctx.globalAlpha = (0.08 + Math.random() * 0.16) * fade;
+        ctx.fillStyle = Math.random() > 0.5 ? '#ff2bd6' : '#35f5ff';
+        ctx.fillRect(
+            Math.random() * canvas.width,
+            Math.random() * canvas.height,
+            8 + Math.random() * (18 + level * 4),
+            2 + Math.random() * (8 + level)
+        );
+    }
+
+    if (level >= 4) {
+        ctx.globalAlpha = Math.min(0.18, 0.04 + level * 0.015) * fade;
+        ctx.fillStyle = '#ffffff';
+        for (let y = 0; y < canvas.height; y += Math.max(5, 12 - Math.floor(level))) {
+            ctx.fillRect(0, y, canvas.width, 1);
+        }
+    }
+
+    ctx.globalAlpha = Math.min(0.65, 0.24 + level * 0.04) * fade;
+    ctx.font = `${Math.min(18 + level * 2, 32)}px Arial Black, Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#35f5ff';
+    ctx.fillText(`SYSTEM SCORE ${glitchState.score}`, canvas.width / 2 + intensity, canvas.height / 2 - intensity);
+    ctx.fillStyle = '#ff2bd6';
+    ctx.fillText(`SYSTEM SCORE ${glitchState.score}`, canvas.width / 2 - intensity, canvas.height / 2 + intensity);
+    ctx.fillStyle = '#eaff7b';
+    ctx.fillText(`SYSTEM SCORE ${glitchState.score}`, canvas.width / 2, canvas.height / 2);
+
+    ctx.restore();
+}
+
+function drawDeathEffects() {
+    if (!deathState.active) return;
+
+    const now = performance.now();
+    const elapsed = now - deathState.startedAt;
+    const progress = Math.min(1, elapsed / DEATH_EFFECT_MS);
+    const chaos = 1 - progress;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+
+    const flashAlpha = Math.max(0, 0.85 - progress * 1.3);
+    ctx.globalAlpha = flashAlpha;
+    ctx.fillStyle = progress < 0.18 ? '#ffffff' : '#ff004c';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.globalAlpha = 0.22 + chaos * 0.2;
+    ctx.fillStyle = '#050008';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const ringCount = 8;
+    for (let i = 0; i < ringCount; i++) {
+        const ringProgress = (progress + i * 0.08) % 1;
+        ctx.globalAlpha = (1 - ringProgress) * 0.5;
+        ctx.strokeStyle = i % 2 === 0 ? '#ff004c' : '#00f5ff';
+        ctx.lineWidth = 2 + (ringCount - i) * 0.45;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, ringProgress * 260, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    deathState.sparks.forEach((spark, index) => {
+        const jitter = Math.sin(elapsed * 0.02 + index) * 18 * chaos;
+        const x = spark.x + Math.cos(spark.angle) * elapsed * 0.06 + jitter;
+        const y = spark.y + Math.sin(spark.angle) * elapsed * 0.06 - jitter;
+
+        ctx.globalAlpha = 0.25 + chaos * 0.6;
+        ctx.strokeStyle = spark.color;
+        ctx.lineWidth = 1 + Math.random() * 3;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(
+            x + Math.cos(spark.angle + Math.random() * 0.8) * spark.length,
+            y + Math.sin(spark.angle + Math.random() * 0.8) * spark.length
+        );
+        ctx.stroke();
+    });
+
+    deathState.particles.forEach((particle, index) => {
+        const t = elapsed / 16;
+        const gravity = t * t * 0.018;
+        const x = particle.x + particle.vx * t;
+        const y = particle.y + particle.vy * t + gravity;
+        const pulse = 1 + Math.sin(elapsed * 0.025 + index) * 0.4;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(particle.angle + particle.spin * t);
+        ctx.globalAlpha = Math.max(0, chaos * 0.9);
+        ctx.fillStyle = particle.color;
+        ctx.fillRect(
+            -particle.size / 2,
+            -particle.size / 2,
+            particle.size * pulse,
+            particle.size * (0.5 + Math.random() * 1.2)
+        );
+        ctx.restore();
+    });
+
+    for (let i = 0; i < 18; i++) {
+        ctx.globalAlpha = (0.08 + Math.random() * 0.18) * chaos;
+        ctx.fillStyle = Math.random() > 0.5 ? '#ffffff' : '#fff200';
+        ctx.fillRect(0, Math.random() * canvas.height, canvas.width, 1 + Math.random() * 4);
+        ctx.fillRect(Math.random() * canvas.width, 0, 1 + Math.random() * 3, canvas.height);
+    }
+
+    ctx.globalAlpha = Math.min(1, 0.35 + chaos * 0.65);
+    ctx.font = '26px Arial Black, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#00f5ff';
+    ctx.fillText('TOTAL SYSTEM FAILURE', centerX + 3, centerY - 12);
+    ctx.fillStyle = '#ff004c';
+    ctx.fillText('TOTAL SYSTEM FAILURE', centerX - 3, centerY - 8);
+    ctx.fillStyle = '#fff200';
+    ctx.fillText('TOTAL SYSTEM FAILURE', centerX, centerY - 10);
+
+    ctx.font = '15px Arial Black, Arial, sans-serif';
+    ctx.globalAlpha = Math.max(0, 0.82 - progress * 0.35);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`FINAL SCORE ${deathState.score}`, centerX, centerY + 22);
+
+    ctx.restore();
 }
 
 function draw() {
@@ -270,6 +704,9 @@ function draw() {
         ctx.fillRect(headX + 5, headY + 5, 3, 3);
         ctx.fillRect(headX + 12, headY + 5, 3, 3);
     }
+
+    drawGlitchEffects();
+    drawDeathEffects();
 }
 
 function gameLoop() {
@@ -277,63 +714,112 @@ function gameLoop() {
     draw();
 }
 
-function startGame() {
-    if (!gameRunning) {
-        gameRunning = true;
-        gamePaused = false;
-        snake = [{ x: Math.floor(TILE_COUNT / 2), y: Math.floor(TILE_COUNT / 2) }];
-        direction = { x: 1, y: 0 };
-        nextDirection = { x: 1, y: 0 };
-        score = 0;
-        document.getElementById('score').textContent = score;
-        spawnFood();
-        document.getElementById('gameStatus').textContent = 'Game Running...';
-        document.getElementById('startBtn').textContent = 'PAUSE';
-    } else if (!gamePaused) {
-        gamePaused = true;
-        document.getElementById('gameStatus').textContent = 'PAUSED';
-        document.getElementById('startBtn').textContent = 'RESUME';
-    } else {
-        gamePaused = false;
-        document.getElementById('gameStatus').textContent = 'Game Running...';
-        document.getElementById('startBtn').textContent = 'PAUSE';
-    }
+function getGameLoopDelay() {
+    return boostActive && gameRunning ? BASE_TICK_MS / BOOST_SPEED_MULTIPLIER : BASE_TICK_MS;
 }
 
-function resetGame() {
-    gameRunning = false;
-    gamePaused = false;
+function scheduleGameLoop() {
+    setTimeout(() => {
+        gameLoop();
+        scheduleGameLoop();
+    }, getGameLoopDelay());
+}
+
+function setStartButtonVisible(isVisible) {
+    document.getElementById('startBtn').style.display = isVisible ? '' : 'none';
+}
+
+function startGame() {
+    if (gameRunning) return;
+
+    gameRunning = true;
+    boostActive = false;
     snake = [{ x: Math.floor(TILE_COUNT / 2), y: Math.floor(TILE_COUNT / 2) }];
     direction = { x: 1, y: 0 };
     nextDirection = { x: 1, y: 0 };
     score = 0;
-    document.getElementById('score').textContent = score;
+    clearNicePause();
+    resetGlitch();
+    resetDeathEffect();
+    setBoardRotationActive(false);
+    updateScoreDisplay();
+    spawnFood();
+    document.getElementById('gameStatus').textContent = 'Hold SPACE to boost';
+    setStartButtonVisible(false);
+}
+
+function resetGame() {
+    gameRunning = false;
+    boostActive = false;
+    snake = [{ x: Math.floor(TILE_COUNT / 2), y: Math.floor(TILE_COUNT / 2) }];
+    direction = { x: 1, y: 0 };
+    nextDirection = { x: 1, y: 0 };
+    score = 0;
+    clearNicePause();
+    resetGlitch();
+    resetDeathEffect();
+    setBoardRotationActive(false);
+    updateScoreDisplay();
     document.getElementById('gameStatus').textContent = 'Press SPACE to start';
     document.getElementById('startBtn').textContent = 'START GAME';
+    setStartButtonVisible(true);
     spawnFood();
     draw();
 }
 
 function endGame() {
+    const finalScore = scoreForDisplay(score);
+    const isNewHighScore = finalScore > Number(highScore);
+
     gameRunning = false;
-    if (score > highScore) {
-        highScore = score;
-        localStorage.setItem('snakeHighScore', highScore);
-        document.getElementById('highScore').textContent = highScore;
-        showSubmitScoreModal(score);
-    } else {
-        document.getElementById('gameStatus').textContent = `Game Over! Score: ${score}`;
-    }
-    document.getElementById('startBtn').textContent = 'START GAME';
+    boostActive = false;
+    clearNicePause();
+    setBoardRotationActive(false);
+    document.getElementById('gameStatus').textContent = 'CRITICAL FAILURE';
+
+    triggerDeathEffect(() => {
+        if (isNewHighScore) {
+            highScore = finalScore;
+            localStorage.setItem('snakeHighScore', highScore);
+            document.getElementById('highScore').textContent = highScore;
+        }
+
+        if (finalScore > 0) {
+            showSubmitScoreModal(finalScore, isNewHighScore);
+        } else {
+            document.getElementById('gameStatus').textContent = `Game Over! Score: ${finalScore}`;
+        }
+
+        document.getElementById('startBtn').textContent = 'START GAME';
+        setStartButtonVisible(true);
+    });
 }
 
 // Input handling
 let touchStartX = 0;
 let touchStartY = 0;
 
+function isTextInputFocused(target) {
+    if (!target) return false;
+
+    const tagName = target.tagName;
+    return (
+        target.isContentEditable ||
+        tagName === 'INPUT' ||
+        tagName === 'TEXTAREA' ||
+        tagName === 'SELECT'
+    );
+}
+
 document.addEventListener('keydown', (e) => {
-    if (!gameRunning && e.code === 'Space') {
-        startGame();
+    if (isTextInputFocused(e.target)) return;
+
+    if (e.code === 'Space') {
+        if (!gameRunning) {
+            startGame();
+        } else {
+            boostActive = true;
+        }
         e.preventDefault();
     }
 
@@ -351,6 +837,15 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
     } else if (e.key === 'ArrowRight' || key === 'd') {
         if (direction.x === 0) nextDirection = { x: 1, y: 0 };
+        e.preventDefault();
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    if (isTextInputFocused(e.target)) return;
+
+    if (e.code === 'Space') {
+        boostActive = false;
         e.preventDefault();
     }
 });
@@ -396,6 +891,9 @@ document.addEventListener('touchmove', (e) => {
 });
 
 // Button event listeners
+voidModeToggle.addEventListener('click', () => {
+    setVoidMode(!darkModeActive);
+});
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('resetBtn').addEventListener('click', resetGame);
 document.getElementById('leaderboardBtn').addEventListener('click', showLeaderboard);
@@ -445,6 +943,7 @@ document.getElementById('playerName').addEventListener('keypress', (e) => {
 });
 
 // Initialize
+setVoidMode(darkModeActive);
 spawnFood();
 draw();
-setInterval(gameLoop, 100);
+scheduleGameLoop();

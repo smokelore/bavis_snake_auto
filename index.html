@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <button class="void-toggle" id="voidModeToggle" type="button" aria-pressed="false">VOID</button>
     <div class="background-container" id="backgroundContainer"></div>
     <div class="container">
         <div class="header">
@@ -17,7 +18,9 @@
             </div>
         </div>
         
-        <canvas id="gameCanvas" width="320" height="320"></canvas>
+        <div class="board-shell" id="boardShell">
+            <canvas id="gameCanvas" width="320" height="320"></canvas>
+        </div>
         
         <div class="controls">
             <p id="gameStatus">Press SPACE to start</p>
@@ -46,6 +49,13 @@
             <button id="submitScoreBtn">SUBMIT SCORE</button>
             <button id="skipSubmitBtn">SKIP</button>
         </div>
+    </div>
+
+    <div class="nice-overlay" id="niceOverlay" aria-hidden="true">
+        <div class="nice-score">69</div>
+        <div class="nice-label">NICE</div>
+        <div class="nice-countdown" id="niceCountdown">3</div>
+    </div>
 
     <script src="game.js"></script>
 </body>

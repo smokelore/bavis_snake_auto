@@ -1,0 +1,27 @@
+{
+  "name": "bavis_snake",
+  "version": "1.0.0",
+  "description": "",
+  "main": "game.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imetandy/bavis_snake.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
+  "bugs": {
+    "url": "https://github.com/imetandy/bavis_snake/issues"
+  },
+  "homepage": "https://github.com/imetandy/bavis_snake#readme",
+  "dependencies": {
+    "@vercel/blob": "^2.3.3"
+  }
+}
