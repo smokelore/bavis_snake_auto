@@ -13,11 +13,14 @@
         <div class="header">
             <h1>BAVIS</h1>
             <div class="score-display">
-                <span>Score: <span id="score">0</span></span>
                 <span>High Score: <span id="highScore">0</span></span>
             </div>
         </div>
-        
+
+        <div class="big-score" id="bigScore">
+            SCORE <span id="score">0</span>
+        </div>
+
         <div class="board-shell" id="boardShell">
             <canvas id="gameCanvas" width="320" height="320"></canvas>
         </div>
@@ -51,8 +54,25 @@
         </div>
     </div>
 
+    <div class="high-score-celebration" id="highScoreCelebration" aria-hidden="true">
+        <div class="hsc-flash" aria-hidden="true"></div>
+        <div class="hsc-rays" aria-hidden="true"></div>
+        <div class="hsc-content">
+            <div class="hsc-title-stack">
+                <div class="hsc-title hsc-title-glitch hsc-title-glitch-1" aria-hidden="true">NEW HIGH SCORE!</div>
+                <div class="hsc-title hsc-title-glitch hsc-title-glitch-2" aria-hidden="true">NEW HIGH SCORE!</div>
+                <div class="hsc-title hsc-title-main">NEW HIGH SCORE!</div>
+            </div>
+            <div class="hsc-score" id="hscScore">0</div>
+            <div class="hsc-subtitle">★ ALL-TIME BEST ★</div>
+        </div>
+    </div>
+
     <div class="nice-overlay" id="niceOverlay" aria-hidden="true">
-        <div class="nice-score">69</div>
+        <div class="nice-score-wrap">
+            <div class="nice-score">69</div>
+            <div class="nice-multiplier" id="niceMultiplier" aria-hidden="true"></div>
+        </div>
         <div class="nice-label">NICE</div>
         <div class="nice-countdown" id="niceCountdown">3</div>
     </div>

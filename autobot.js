@@ -18,19 +18,39 @@
     const VIEW_LEADERBOARD_MS  = 3000;
     const AUTO_START_ON_LOAD   = true;
 
+    // Number of bot ticks at the start of each run during which mistakes are
+    // disabled. Tapsell never voluntarily dies, so this guarantees the snake
+    // reaches at least ~score 20 before any mistake roll can fire. Each food
+    // costs ~15 ticks, so 45 ticks ≈ 3 foods of guaranteed safe play.
+    const WARMUP_TICKS         = 45;
+
+    // --- Boost behaviour ---
+    // Random short bursts of SPACE-held boost while playing. Tuned for an
+    // expected duty cycle of ~9% (well under the 15% cap, leaves headroom
+    // for short-window variance) with single bursts bounded to
+    // BOOST_MAX_DURATION_MS so no boost stretch exceeds 2 s.
+    const BOOST_CHECK_INTERVAL_MS = 1000;  // roll the boost trigger every 1 s
+    const BOOST_TRIGGER_PROB      = 0.08;  // 8% chance per check
+    const BOOST_MIN_DURATION_MS   = 400;
+    const BOOST_MAX_DURATION_MS   = 2000;
+
     // --- Mistake / skill distribution (per-run) ---
     // Each new run samples a per-tick mistake probability. ZONED runs have a
-    // low rate and can push well past 420 points; DRUNK runs have a high
-    // rate and usually end under 100. Calibrated against a Monte Carlo
-    // simulation to approximate:
-    //   ~77% of runs end below 100 points
-    //   ~3-5% of runs cross 420 points
-    //   ~0.5-1% of runs cross 1000 points
-    const ZONED_RUN_PROB   = 0.07;
-    const ZONED_RATE_MIN   = 0.001;  // 0.1% per tick
-    const ZONED_RATE_MAX   = 0.007;  // 0.7% per tick
-    const DRUNK_RATE_MIN   = 0.08;   // 8%   per tick
-    const DRUNK_RATE_MAX   = 0.15;   // 15%  per tick
+    // very low rate and can push well past 600 points; "drunk" runs (the
+    // common case) now use a much tighter, low-mistake band so the bot
+    // mostly clears the early game. Monte Carlo (n=80k) approximates:
+    //   ~15% of runs end below 100 points
+    //   ~40% of runs end below 200 points
+    //   ~5%  of runs cross 600 points
+    //   ~1%  of runs cross 1000 points
+    //
+    // Note: the model floors <100 at ~15%; pulling it lower also drags <200
+    // below 40%, so this is the best simultaneous fit we can hit.
+    const ZONED_RUN_PROB   = 0.04;
+    const ZONED_RATE_MIN   = 0.0001;   // 0.01% per tick
+    const ZONED_RATE_MAX   = 0.0015;   // 0.15% per tick
+    const DRUNK_RATE_MIN   = 0.008;    // 0.8%  per tick
+    const DRUNK_RATE_MAX   = 0.014;    // 1.4%  per tick
 
     const sampleRunMistakeRate = () => {
         if (Math.random() < ZONED_RUN_PROB) {
@@ -153,6 +173,9 @@
     let viewTimeout     = null;
     let phase           = 'idle'; // 'play' | 'dying' | 'submitting' | 'viewing' | 'idle'
     let runMistakeRate  = 0;      // resampled at the start of each run
+    let warmupRemaining = 0;      // ticks left in the no-mistakes grace period
+    let boostUntil      = 0;      // performance.now() at which to stop boosting
+    let boostNextCheck  = 0;      // performance.now() at which to roll next trigger
 
     // ---------- I/O ----------
     const send = (key) => document.dispatchEvent(
@@ -236,6 +259,36 @@
         return best;
     };
 
+    // Press/release the SPACE key via synthetic events. The game's keydown
+    // handler flips boostActive on while gameRunning; keyup clears it.
+    const sendBoostKey = (type) => document.dispatchEvent(
+        new KeyboardEvent(type, { key: ' ', code: 'Space', bubbles: true })
+    );
+
+    const stopBoost = () => {
+        if (boostUntil > 0) {
+            sendBoostKey('keyup');
+            boostUntil = 0;
+        }
+    };
+
+    // Roll for a boost burst at most once per BOOST_CHECK_INTERVAL_MS, and
+    // hold each burst for a random duration up to BOOST_MAX_DURATION_MS.
+    const tickBoost = () => {
+        const now = performance.now();
+        if (boostUntil > 0) {
+            if (now >= boostUntil) stopBoost();
+            return;
+        }
+        if (now < boostNextCheck) return;
+        boostNextCheck = now + BOOST_CHECK_INTERVAL_MS;
+        if (Math.random() >= BOOST_TRIGGER_PROB) return;
+        const dur = BOOST_MIN_DURATION_MS
+            + Math.random() * (BOOST_MAX_DURATION_MS - BOOST_MIN_DURATION_MS);
+        boostUntil = now + dur;
+        sendBoostKey('keydown');
+    };
+
     // Pick a random non-reverse direction other than the "correct" one. Used
     // when the per-run mistake roll fires. Two candidates are always
     // available (4 dirs minus reverse minus correct), so this returns a
@@ -260,13 +313,16 @@
         if (!running) return;
 
         if (phase === 'play') {
-            if (deathState && deathState.active) { phase = 'dying'; return; }
-            if (!gameRunning) { phase = 'idle'; return; }
-            if (nicePauseActive) return;
+            if (deathState && deathState.active) { stopBoost(); phase = 'dying'; return; }
+            if (!gameRunning) { stopBoost(); phase = 'idle'; return; }
+            if (nicePauseActive) { stopBoost(); return; }
+            tickBoost();
             const head = snake[0];
             const correct = chooseNext();
             if (!correct) return;
-            const choice = (runMistakeRate > 0 && Math.random() < runMistakeRate)
+            const mistakesArmed = warmupRemaining <= 0;
+            if (!mistakesArmed) warmupRemaining -= 1;
+            const choice = (mistakesArmed && runMistakeRate > 0 && Math.random() < runMistakeRate)
                 ? pickMistake(head, correct)
                 : correct;
             setDir(choice.x - head.x, choice.y - head.y);
@@ -275,6 +331,8 @@
 
         if (phase === 'dying') {
             if (deathState && deathState.active) return;
+            // Wait for the NEW HIGH SCORE celebration to finish too.
+            if (document.body.classList.contains('high-score-celebration-active')) return;
             if (submitModalShown()) {
                 const nameInput = document.getElementById('playerName');
                 const name = nextBotName();
@@ -310,7 +368,8 @@
         if (phase === 'idle') {
             if (!gameRunning) {
                 runMistakeRate = sampleRunMistakeRate();
-                console.log(`autobot: new run, mistake rate = ${runMistakeRate.toFixed(4)}`);
+                warmupRemaining = WARMUP_TICKS;
+                console.log(`autobot: new run, mistake rate = ${runMistakeRate.toFixed(4)} (warmup ${WARMUP_TICKS} ticks)`);
                 send('Space');
             }
             phase = 'play';
@@ -332,6 +391,7 @@
         running = false;
         if (tickId) clearInterval(tickId);
         if (viewTimeout) clearTimeout(viewTimeout);
+        stopBoost();
         tickId = null;
         viewTimeout = null;
         phase = 'idle';

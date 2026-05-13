@@ -309,6 +309,7 @@ function setBoardRotationActive(isActive) {
 
     boardRotationActive = isActive;
     boardShell.classList.toggle('board-rotating', isActive);
+    document.body.classList.toggle('score-spinning', isActive);
 }
 
 function maybeStartBoardRotation() {
@@ -331,8 +332,71 @@ function clearNicePause() {
     document.body.classList.remove('nice-paused');
 }
 
+// Each NICE (score ending in 69) trigger increments this counter and
+// progressively speeds up the global hue-shift animation. Reset only on a
+// full page reload, so it carries over across deaths/restarts.
+let niceTriggerCount = 0;
+const HUE_SHIFT_BASE_DURATION_S = 30;   // first trigger: 30s per full hue cycle
+const HUE_SHIFT_MIN_DURATION_S  = 0.6;  // floor so it never becomes seizure-fast
+
+function bumpHueShift() {
+    niceTriggerCount += 1;
+    const duration = Math.max(
+        HUE_SHIFT_MIN_DURATION_S,
+        HUE_SHIFT_BASE_DURATION_S / niceTriggerCount
+    );
+    document.documentElement.style.setProperty('--hue-shift-duration', `${duration}s`);
+    document.body.classList.add('hue-shifting');
+
+    const mult = document.getElementById('niceMultiplier');
+    if (mult) {
+        mult.textContent = `x${niceTriggerCount}`;
+        // re-trigger the pop animation by removing and re-adding the class
+        mult.classList.remove('show');
+        void mult.offsetWidth;
+        mult.classList.add('show');
+    }
+}
+
+const HIGH_SCORE_CELEBRATION_MS = 3500;
+
+function triggerHighScoreCelebration(scoreValue, onComplete) {
+    const overlay = document.getElementById('highScoreCelebration');
+    if (!overlay) { onComplete(); return; }
+
+    const scoreEl = document.getElementById('hscScore');
+    if (scoreEl) scoreEl.textContent = scoreValue;
+
+    document.body.classList.add('high-score-celebration-active');
+    overlay.classList.remove('show');
+    void overlay.offsetWidth;
+    overlay.classList.add('show');
+    overlay.setAttribute('aria-hidden', 'false');
+
+    setTimeout(() => {
+        document.body.classList.remove('high-score-celebration-active');
+        overlay.classList.remove('show');
+        overlay.setAttribute('aria-hidden', 'true');
+        onComplete();
+    }, HIGH_SCORE_CELEBRATION_MS);
+}
+
+function resetHueShift() {
+    niceTriggerCount = 0;
+    document.body.classList.remove('hue-shifting');
+    document.documentElement.style.removeProperty('--hue-shift-duration');
+
+    const mult = document.getElementById('niceMultiplier');
+    if (mult) {
+        mult.classList.remove('show');
+        mult.textContent = '';
+    }
+}
+
 function triggerNicePause() {
     if (nicePauseActive) return;
+
+    bumpHueShift();
 
     const overlay = document.getElementById('niceOverlay');
     const countdown = document.getElementById('niceCountdown');
@@ -741,6 +805,7 @@ function startGame() {
     clearNicePause();
     resetGlitch();
     resetDeathEffect();
+    resetHueShift();
     setBoardRotationActive(false);
     updateScoreDisplay();
     spawnFood();
@@ -758,6 +823,7 @@ function resetGame() {
     clearNicePause();
     resetGlitch();
     resetDeathEffect();
+    resetHueShift();
     setBoardRotationActive(false);
     updateScoreDisplay();
     document.getElementById('gameStatus').textContent = 'Press SPACE to start';
@@ -784,14 +850,21 @@ function endGame() {
             document.getElementById('highScore').textContent = highScore;
         }
 
-        if (finalScore > 0) {
-            showSubmitScoreModal(finalScore, isNewHighScore);
-        } else {
-            document.getElementById('gameStatus').textContent = `Game Over! Score: ${finalScore}`;
-        }
+        const proceedToSubmit = () => {
+            if (finalScore > 0) {
+                showSubmitScoreModal(finalScore, isNewHighScore);
+            } else {
+                document.getElementById('gameStatus').textContent = `Game Over! Score: ${finalScore}`;
+            }
+            document.getElementById('startBtn').textContent = 'START GAME';
+            setStartButtonVisible(true);
+        };
 
-        document.getElementById('startBtn').textContent = 'START GAME';
-        setStartButtonVisible(true);
+        if (isNewHighScore && finalScore > 0) {
+            triggerHighScoreCelebration(finalScore, proceedToSubmit);
+        } else {
+            proceedToSubmit();
+        }
     });
 }
 
