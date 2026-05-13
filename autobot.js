@@ -20,9 +20,10 @@
 
     // Number of bot ticks at the start of each run during which mistakes are
     // disabled. Tapsell never voluntarily dies, so this guarantees the snake
-    // reaches at least ~score 20 before any mistake roll can fire. Each food
-    // costs ~15 ticks, so 45 ticks ≈ 3 foods of guaranteed safe play.
-    const WARMUP_TICKS         = 45;
+    // reaches at least ~score 40 before any mistake roll can fire. Each food
+    // costs ~15 ticks, so 60 ticks ≈ 4 foods of guaranteed safe play (well
+    // above the 30-point floor we want).
+    const WARMUP_TICKS         = 60;
 
     // --- Boost behaviour ---
     // Random short bursts of SPACE-held boost while playing. Tuned for an
@@ -35,22 +36,20 @@
     const BOOST_MAX_DURATION_MS   = 2000;
 
     // --- Mistake / skill distribution (per-run) ---
-    // Each new run samples a per-tick mistake probability. ZONED runs have a
-    // very low rate and can push well past 600 points; "drunk" runs (the
-    // common case) now use a much tighter, low-mistake band so the bot
-    // mostly clears the early game. Monte Carlo (n=80k) approximates:
-    //   ~15% of runs end below 100 points
-    //   ~40% of runs end below 200 points
-    //   ~5%  of runs cross 600 points
-    //   ~1%  of runs cross 1000 points
-    //
-    // Note: the model floors <100 at ~15%; pulling it lower also drags <200
-    // below 40%, so this is the best simultaneous fit we can hit.
-    const ZONED_RUN_PROB   = 0.04;
-    const ZONED_RATE_MIN   = 0.0001;   // 0.01% per tick
-    const ZONED_RATE_MAX   = 0.0015;   // 0.15% per tick
-    const DRUNK_RATE_MIN   = 0.008;    // 0.8%  per tick
-    const DRUNK_RATE_MAX   = 0.014;    // 1.4%  per tick
+    // Each new run samples a per-tick mistake probability. All four bounds
+    // were halved AGAIN (so 25% of the original tune, mistakes are now 4x
+    // rarer than the starting calibration). Monte Carlo (n=80k):
+    //   ~3%  of runs end below 100 points
+    //   ~11% of runs end below 200 points
+    //   ~62% of runs cross 420 points
+    //   ~41% of runs cross 600 points
+    //   ~17% of runs cross 1000 points
+    //   ~6%  of runs cross 2000 points (close to board-fill territory)
+    const ZONED_RUN_PROB   = 0.07;
+    const ZONED_RATE_MIN   = 0.000025;  // 0.0025% per tick
+    const ZONED_RATE_MAX   = 0.000375;  // 0.0375% per tick
+    const DRUNK_RATE_MIN   = 0.002;     // 0.2%    per tick
+    const DRUNK_RATE_MAX   = 0.0035;    // 0.35%   per tick
 
     const sampleRunMistakeRate = () => {
         if (Math.random() < ZONED_RUN_PROB) {

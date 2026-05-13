@@ -704,8 +704,20 @@ function drawDeathEffects() {
 }
 
 function draw() {
-    // Clear canvas
-    ctx.fillStyle = COLORS.darkBg;
+    // Sync the boost visual class with the live boostActive flag so the
+    // CSS chromatic / vignette / FOV / speed-line effects engage in real time.
+    const motionTrailActive = boostActive && gameRunning && !nicePauseActive;
+    document.body.classList.toggle('boosting', motionTrailActive);
+
+    // Clear canvas. While boosting we use a translucent dark overlay so the
+    // previous frame fades instead of being erased — the snake's old
+    // positions ghost behind it as a true motion trail (each frame ~55% as
+    // bright as the last; gone after ~5 frames).
+    if (motionTrailActive) {
+        ctx.fillStyle = 'rgba(15, 20, 32, 0.45)';
+    } else {
+        ctx.fillStyle = COLORS.darkBg;
+    }
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Draw grid
